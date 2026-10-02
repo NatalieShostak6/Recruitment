@@ -1,0 +1,42 @@
+#  Інфраструктура для трьох баз даних
+
+services:
+
+  # SQL Server 2022: дві окремі бази - HiringDb і VacancyCatalogDb
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: lab01-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Lab01_Str0ng!Pass" 
+      MSSQL_PID: "Developer"                   
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql            
+      - ./:/scripts:ro                  
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+
+
+  # MongoDB: база talent_profiles
+  mongo:
+    image: mongo:7
+    container_name: lab01-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mssql-data:
+  mongo-data:
+
+

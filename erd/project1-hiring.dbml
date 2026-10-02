@@ -1,0 +1,128 @@
+// ERD Проєкту №1 — HiringDb
+
+Project HiringDb {
+  database_type: 'SQL Server'
+  Note: 'Контекст Hiring: кандидати, заявки, етапи, офери. Vacancies — локальна копія довідника з VacancyCatalogDb, без FK між базами.'
+}
+
+Table Candidates {
+  Id          bigint       [pk, increment]
+  Email       nvarchar(256) [not null, note: 'UNIQUE серед IsDeleted = 0']
+  FullName    nvarchar(200) [not null]
+  Phone       nvarchar(30)
+  Source      nvarchar(30)  [not null, default: 'Website', note: 'CHECK: Website|Referral|LinkedIn|JobBoard|Event']
+  CreatedAt   datetime2     [not null]
+  CreatedBy   nvarchar(100)
+  UpdatedAt   datetime2
+  UpdatedBy   nvarchar(100)
+  IsDeleted   bit           [not null, default: 0]
+  RowVersion  rowversion    [note: 'оптимістична конкурентність']
+
+  indexes {
+    Email [unique, name: 'UX_Candidates_Email (filtered: IsDeleted = 0)']
+  }
+}
+
+Table CandidateProfiles {
+  CandidateId      bigint        [pk, note: 'PK = FK -> зв\'язок 1:1']
+  Headline         nvarchar(200)
+  LinkedInUrl      nvarchar(300)
+  ExpectedSalary   decimal(18,2) [note: 'CHECK > 0']
+  Currency         char(3)       [not null, default: 'USD']
+  ReadyToRelocate  bit           [not null, default: 0]
+  NoticePeriodDays int           [not null, default: 14, note: 'CHECK 0..180']
+  CreatedAt        datetime2     [not null]
+  UpdatedAt        datetime2
+  RowVersion       rowversion
+}
+
+Table Vacancies {
+  Id             bigint        [pk, note: 'БЕЗ IDENTITY — той самий Id, що у VacancyCatalogDb']
+  Title          nvarchar(200) [not null]
+  CompanyName    nvarchar(200) [not null]
+  DepartmentName nvarchar(100)
+  IsOpen         bit           [not null, default: 1]
+  SyncedAt       datetime2     [not null]
+  IsDeleted      bit           [not null, default: 0]
+  RowVersion     rowversion
+
+  Note: 'ЛОКАЛЬНА КОПІЯ ДОВІДНИКА. Власник даних — VacancyCatalogDb. Оновлюється подіями VacancyPublished / VacancyUpdated / VacancyClosed.'
+}
+
+Table ApplicationStatusTransitions {
+  FromStatus nvarchar(20)
+  ToStatus   nvarchar(20)
+
+  indexes {
+    (FromStatus, ToStatus) [pk]
+  }
+  Note: 'Статусна машина у вигляді даних: процедура usp_Application_ChangeStatus перевіряє перехід саме тут.'
+}
+
+Table Applications {
+  Id           bigint        [pk, increment]
+  CandidateId  bigint        [not null]
+  VacancyId    bigint        [not null]
+  VacancyTitle nvarchar(200) [not null, note: 'ЗНІМОК на момент подання — не оновлюється']
+  CompanyName  nvarchar(200) [not null, note: 'ЗНІМОК на момент подання — не оновлюється']
+  Status       nvarchar(20)  [not null, default: 'Applied', note: 'CHECK: Applied|Screening|Interview|Offer|Hired|Rejected|Withdrawn']
+  Score        tinyint       [note: 'CHECK 1..10']
+  AppliedAt    datetime2     [not null]
+  ClosedAt     datetime2
+  CreatedAt    datetime2     [not null]
+  CreatedBy    nvarchar(100)
+  UpdatedAt    datetime2
+  UpdatedBy    nvarchar(100)
+  IsDeleted    bit           [not null, default: 0]
+  RowVersion   rowversion
+
+  indexes {
+    (CandidateId, VacancyId) [unique, name: 'UX_Applications_Candidate_Vacancy (filtered)']
+    (VacancyId, Status)      [name: 'IX_Applications_VacancyId_Status — воронка по вакансії']
+    (CandidateId, AppliedAt) [name: 'IX_Applications_CandidateId_AppliedAt — історія кандидата']
+  }
+  Note: 'M:N між Candidates і Vacancies: проміжна таблиця з двома FK ТА власними полями (Status, Score, AppliedAt, знімки).'
+}
+
+Table ApplicationStageHistory {
+  Id            bigint       [pk, increment]
+  ApplicationId bigint       [not null]
+  FromStatus    nvarchar(20) [note: 'NULL для першого запису']
+  ToStatus      nvarchar(20) [not null]
+  ChangedAt     datetime2    [not null]
+  ChangedBy     nvarchar(100)
+  Note          nvarchar(500)
+
+  indexes {
+    (ApplicationId, ChangedAt) [name: 'IX_StageHistory_ApplicationId_ChangedAt — таймлайн заявки']
+  }
+}
+
+Table Offers {
+  ApplicationId bigint        [pk, note: 'PK = FK -> зв\'язок 1:1']
+  Salary        decimal(18,2) [not null, note: 'CHECK > 0']
+  Currency      char(3)       [not null, default: 'USD']
+  StartDate     date          [not null]
+  Status        nvarchar(20)  [not null, default: 'Draft', note: 'CHECK: Draft|Sent|Accepted|Declined|Expired']
+  SentAt        datetime2
+  RespondedAt   datetime2
+  CreatedAt     datetime2     [not null]
+  CreatedBy     nvarchar(100)
+  UpdatedAt     datetime2
+  UpdatedBy     nvarchar(100)
+  RowVersion    rowversion
+}
+
+
+
+// Зв'язки
+// 1:1 — зовнішній ключ є водночас первинним ключем залежної таблиці
+Ref: CandidateProfiles.CandidateId - Candidates.Id      [delete: cascade]
+Ref: Offers.ApplicationId          - Applications.Id    [delete: cascade]
+
+// 1:N — FK у таблиці на боці «багатьох»
+Ref: ApplicationStageHistory.ApplicationId > Applications.Id [delete: cascade]
+
+// M:N — Candidates <-> Vacancies через проміжну таблицю Applications
+Ref: Applications.CandidateId > Candidates.Id
+Ref: Applications.VacancyId   > Vacancies.Id

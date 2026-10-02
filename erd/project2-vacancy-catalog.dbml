@@ -1,0 +1,120 @@
+// ERD Проєкту №2 — VacancyCatalogDb
+
+Project VacancyCatalogDb {
+  database_type: 'SQL Server'
+  Note: 'Контекст Vacancy Catalog: єдиний власник даних про компанії, відділи, навички та вакансії. У Лаб. 03 реалізується через EF Core Code First + Fluent API.'
+}
+
+Table Companies {
+  Id         bigint        [pk, increment]
+  Name       nvarchar(200) [not null]
+  Slug       nvarchar(100) [not null, note: 'UNIQUE серед IsDeleted = 0; CHECK без пробілів']
+  Industry   nvarchar(100) [not null, default: 'IT']
+  WebsiteUrl nvarchar(300)
+  CreatedAt  datetime2     [not null]
+  CreatedBy  nvarchar(100)
+  UpdatedAt  datetime2
+  UpdatedBy  nvarchar(100)
+  IsDeleted  bit           [not null, default: 0]
+  RowVersion rowversion
+
+  indexes {
+    Slug [unique, name: 'UX_Companies_Slug (filtered)']
+  }
+}
+
+Table CompanyProfiles {
+  CompanyId     bigint         [pk, note: 'PK = FK -> зв\'язок 1:1']
+  About         nvarchar(2000)
+  FoundedYear   smallint       [note: 'CHECK 1800..2100']
+  EmployeeCount int            [note: 'CHECK > 0']
+  LogoUrl       nvarchar(300)
+  CreatedAt     datetime2      [not null]
+  UpdatedAt     datetime2
+  RowVersion    rowversion
+}
+
+Table Departments {
+  Id         bigint        [pk, increment]
+  CompanyId  bigint        [not null]
+  Name       nvarchar(100) [not null]
+  CostCenter nvarchar(20)
+  CreatedAt  datetime2     [not null]
+  UpdatedAt  datetime2
+  IsDeleted  bit           [not null, default: 0]
+  RowVersion rowversion
+
+  indexes {
+    CompanyId [name: 'IX_Departments_CompanyId — список відділів компанії']
+  }
+}
+
+Table Skills {
+  Id        bigint       [pk, increment]
+  Name      nvarchar(80) [not null, note: 'UNIQUE']
+  Category  nvarchar(40) [not null, default: 'Technical', note: 'CHECK: Technical|Tool|Language|Soft|Domain']
+  CreatedAt datetime2    [not null]
+
+  indexes {
+    Name [unique, name: 'UX_Skills_Name']
+  }
+}
+
+Table Vacancies {
+  Id             bigint        [pk, increment]
+  CompanyId      bigint        [not null]
+  DepartmentId   bigint
+  Title          nvarchar(200) [not null]
+  Slug           nvarchar(150) [not null, note: 'UNIQUE серед IsDeleted = 0']
+  Description    nvarchar(max)
+  EmploymentType nvarchar(20)  [not null, default: 'FullTime', note: 'CHECK: FullTime|PartTime|Contract|Internship']
+  WorkMode       nvarchar(20)  [not null, default: 'Hybrid', note: 'CHECK: Onsite|Hybrid|Remote']
+  SeniorityLevel nvarchar(20)  [not null, default: 'Middle', note: 'CHECK: Intern|Junior|Middle|Senior|Lead']
+  City           nvarchar(100)
+  SalaryMin      decimal(18,2) [note: 'CHECK > 0 і SalaryMin <= SalaryMax']
+  SalaryMax      decimal(18,2)
+  Currency       char(3)       [not null, default: 'USD']
+  IsOpen         bit           [not null, default: 1]
+  PublishedAt    datetime2
+  CreatedAt      datetime2     [not null]
+  CreatedBy      nvarchar(100)
+  UpdatedAt      datetime2
+  UpdatedBy      nvarchar(100)
+  IsDeleted      bit           [not null, default: 0]
+  RowVersion     rowversion
+
+  indexes {
+    Slug                            [unique, name: 'UX_Vacancies_Slug (filtered)']
+    PublishedAt                     [name: 'IX_Vacancies_Feed — стрічка відкритих вакансій (filtered + INCLUDE)']
+    (CompanyId, DepartmentId)       [name: 'IX_Vacancies_Company_Department — кабінет роботодавця']
+    (SeniorityLevel, WorkMode, City) [name: 'IX_Vacancies_Seniority_WorkMode — фасетний фільтр']
+  }
+  Note: 'ВЛАСНИК даних про вакансію. Id цієї таблиці копіюється в HiringDb.dbo.Vacancies і в MongoDB (поле vacancyId) — лише як значення, без FK.'
+}
+
+Table VacancySkills {
+  VacancyId     bigint       [not null]
+  SkillId       bigint       [not null]
+  RequiredLevel nvarchar(20) [not null, default: 'Intermediate', note: 'ВЛАСНЕ ПОЛЕ зв\'язку. CHECK: Basic|Intermediate|Advanced|Expert']
+  IsMandatory   bit          [not null, default: 1, note: 'ВЛАСНЕ ПОЛЕ зв\'язку']
+  AddedAt       datetime2    [not null, note: 'ВЛАСНЕ ПОЛЕ зв\'язку']
+
+  indexes {
+    (VacancyId, SkillId)     [pk]
+    (SkillId, RequiredLevel) [name: 'IX_VacancySkills_Skill_Level — зворотний бік M:N']
+  }
+  Note: 'M:N Vacancies <-> Skills. Має власні поля, тому в EF Core описується окремим класом-сутністю, а не skip-навігацією.'
+}
+
+// Зв'язки
+// 1:1
+Ref: CompanyProfiles.CompanyId - Companies.Id [delete: cascade]
+
+// 1:N
+Ref: Departments.CompanyId  > Companies.Id   [delete: cascade]
+Ref: Vacancies.CompanyId    > Companies.Id   [delete: no action]
+Ref: Vacancies.DepartmentId > Departments.Id [delete: no action]
+
+// M:N через проміжну сутність із власними полями
+Ref: VacancySkills.VacancyId > Vacancies.Id [delete: cascade]
+Ref: VacancySkills.SkillId   > Skills.Id    [delete: no action]
